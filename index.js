@@ -20,18 +20,41 @@ const client = new Client({
 });
 
 // Inicializar API de Gemini
-const ai = process.env.gemini_api_key ? new GoogleGenAI({ apiKey: process.env.gemini_api_key }) : null;
+const apiKey = process.env.gemini_api_key;
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// Lista de modelos ordenados de preferencia para Fallback
+// Modelos de Gemini probados en orden
 const MODELOS_GEMINI = [
   'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash'
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash'
 ];
 
-// Función para solicitar texto a Gemini probando modelos uno a uno
+// Estados aleatorios de respaldo si la IA falla o se agota la cuota
+const ESTADOS_RESPALDO = [
+  "Dividiendo por cero...",
+  "Odiando las matrices...",
+  "Pensando en Pi...",
+  "Buscando la x...",
+  "Procesando derivadas...",
+  "Simulando conciencia...",
+  "Juzgando tu sintaxis...",
+  "Optimizando algoritmos...",
+  "Resolviendo integrales...",
+  "Contando en binario...",
+  "E = mc² (creo)...",
+  "Reiniciando neuronas...",
+  "Analizando variables...",
+  "Calculando el infinito...",
+  "Evitando errores 404..."
+];
+
+// Función con fallback y logs detallados de error
 async function generarTextoConFallback(prompt) {
-  if (!ai) return null;
+  if (!ai) {
+    console.warn('[Gemini Warning] No se detectó la variable gemini_api_key en Render.');
+    return null;
+  }
 
   for (const model of MODELOS_GEMINI) {
     try {
@@ -43,14 +66,14 @@ async function generarTextoConFallback(prompt) {
         return response.text.trim();
       }
     } catch (error) {
-      console.warn(`[Gemini Fallback] El modelo ${model} falló, intentando el siguiente...`);
+      console.warn(`[Gemini Fallback] ${model} falló. Motivo: ${error.message}`);
     }
   }
-  console.error('[Gemini Error] Ningún modelo de la lista estuvo disponible.');
+  console.error('[Gemini Error] Ningún modelo respondió correctamente.');
   return null;
 }
 
-// Banco extenso de chistes y respuestas sarcásticas para Calki
+// Banco de chistes matemáticos
 const CHISTES_MATEMATICOS = [
   "¿Qué le dice un vector a otro? ¿Tienes un momento?",
   "¿Qué le dice un número 0 a un número 8? ¡Buen cinturón!",
@@ -72,20 +95,23 @@ function obtenerChisteAleatorio() {
   return CHISTES_MATEMATICOS[Math.floor(Math.random() * CHISTES_MATEMATICOS.length)];
 }
 
-// Función para corregir errores comunes de escritura humana
 function limpiarExpresion(expr) {
   return expr
-    .replace(/[,]/g, '.')                   // Cambia comas decimales por puntos (ej: 3,14 -> 3.14)
-    .replace(/(\d)\s*x\s*(\d)/gi, '$1*$2')  // Cambia 'x' por '*' (ej: 5 x 5 -> 5 * 5)
-    .replace(/(\d)\s+(?=\d)/g, '$1');       // Une números separados por espacios (ej: "3 1289" -> "31289")
+    .replace(/[,]/g, '.')
+    .replace(/(\d)\s*x\s*(\d)/gi, '$1*$2')
+    .replace(/(\d)\s+(?=\d)/g, '$1');
 }
 
-// Actualizar el Estado del Bot usando la IA
+// Cambia el estado usando la IA (o respaldo dinámico)
 async function actualizarEstadoAI() {
-  const prompt = "Genera una frase ultra corta (máximo 6 palabras) para el estado de un bot de Discord llamado Calki que es una calculadora sarcástica e inteligente. En español. Ejemplos: 'Dividiendo por cero...', 'Odiando las matrices', 'Pensando en Pi'. Responde ÚNICAMENTE con la frase, sin comillas.";
+  const prompt = "Genera una frase ultra corta (máximo 5 palabras) para el estado de Discord de un bot calculadora llamado Calki. En español. Ejemplos: 'Odiando las matrices', 'Pensando en Pi', 'Calculando el fin del mundo'. Responde SOLO la frase, sin comillas.";
 
   const statusText = await generarTextoConFallback(prompt);
-  const textoFinal = statusText ? statusText.replace(/^["']|["']$/g, '') : "Calculando Pi...";
+  
+  // Si la IA responde se usa su texto; si falla, elige uno al azar de la lista de respaldo
+  const textoFinal = statusText 
+    ? statusText.replace(/^["']|["']$/g, '') 
+    : ESTADOS_RESPALDO[Math.floor(Math.random() * ESTADOS_RESPALDO.length)];
 
   const actividades = [
     ActivityType.Playing,
@@ -102,14 +128,14 @@ async function actualizarEstadoAI() {
   console.log(`[Calki AI Status]: ${textoFinal}`);
 }
 
-// Evento aleatorio espontáneo: publica datos curiosos o reflexiones científicas
+// Evento espontáneo aleatorio
 async function eventoEspontaneoAI() {
-  const prompt = "Genera un dato curioso, científico, matemático o un pensamiento filosófico de computadora súper interesante y corto (máximo 2 oraciones). En español, con un toque ingenioso o sarcástico.";
+  const prompt = "Genera un dato curioso, científico o matemático muy corto (máximo 2 oraciones). En español, ingenioso y divertido.";
   
   const datoCurioso = await generarTextoConFallback(prompt);
   if (!datoCurioso) return;
 
-  console.log(`\n🧠 [Calki Dato Curioso en Consola]: ${datoCurioso}\n`);
+  console.log(`\n🧠 [Calki Dato Curioso]: ${datoCurioso}\n`);
 
   try {
     const canal = client.channels.cache.find(c => 
@@ -121,27 +147,27 @@ async function eventoEspontaneoAI() {
       await canal.send(`💡 **Dato curioso fuera de contexto:**\n> ${datoCurioso}`);
     }
   } catch (err) {
-    console.error('No se pudo enviar el dato curioso a un canal:', err.message);
+    console.error('No se pudo enviar el dato curioso:', err.message);
   }
 }
 
 client.on('clientReady', () => {
   console.log(`🤖 Calki está lista y operando como ${client.user.tag}`);
 
-  // Actualizar estado al iniciar y cada 5 minutos
+  // Actualizar estado al conectar y luego CADA 2 MINUTOS (máxima velocidad segura)
   actualizarEstadoAI();
-  cron.schedule('*/5 * * * *', () => {
+  cron.schedule('*/2 * * * *', () => {
     actualizarEstadoAI();
   });
 
-  // Evento aleatorio cada 15 minutos (40% de probabilidad de activarse espontáneamente)
+  // Evento aleatorio cada 15 minutos (40% probabilidad)
   cron.schedule('*/15 * * * *', () => {
     if (Math.random() < 0.4) {
       eventoEspontaneoAI();
     }
   });
 
-  // Autoping para Render (Keep-Alive)
+  // Keep-Alive para Render
   const renderUrl = process.env.RENDER_EXTERNAL_URL;
   if (renderUrl) {
     cron.schedule('*/10 * * * *', async () => {
@@ -155,7 +181,7 @@ client.on('clientReady', () => {
   }
 });
 
-// Lectura e Interpretación de Mensajes
+// Lectura de mensajes
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
@@ -176,12 +202,10 @@ client.on('messageCreate', async (message) => {
     let result;
     const exprLimpia = limpiarExpresion(expr);
 
-    // 1. Intentar calcular con mathjs
     try {
       result = evaluate(exprLimpia);
     } catch (err) {
-      // 2. Respaldo: Si mathjs falla, le pedimos ayuda a la IA de Gemini
-      const promptAI = `Resuelve la siguiente expresión matemática. El usuario pudo cometer errores de formato o tipeo: "${expr}". Responde ÚNICAMENTE con el número del resultado final. Si definitivamente no es una operación matemática, responde "INVALIDO".`;
+      const promptAI = `Resuelve esta operación matemática: "${expr}". Responde ÚNICAMENTE con el número final del resultado. Si no es una operación válida, responde "INVALIDO".`;
       const respuestaAI = await generarTextoConFallback(promptAI);
       
       if (respuestaAI && !respuestaAI.includes('INVALIDO')) {
@@ -189,7 +213,6 @@ client.on('messageCreate', async (message) => {
       }
     }
 
-    // Responder con el resultado o con un chiste si fallan ambos
     if (result !== undefined) {
       await message.reply(`🧮 **Resultado:** \`${result}\` *(Fácil)*`);
     } else if (isCommand) {
