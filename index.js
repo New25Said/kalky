@@ -23,10 +23,13 @@ const client = new Client({
 const apiKey = process.env.gemini_api_key;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// Modelos estables de Gemini
+// Reemplaza esta sección en tu index.js:
+
+// Modelos oficiales de la API de Gemini
 const MODELOS_GEMINI = [
-  'gemini-2.5-flash',
-  'gemini-1.5-flash'
+  'gemini-3.6-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-2.5-flash'
 ];
 
 // Control de cuota (cooldown)
