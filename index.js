@@ -22,7 +22,7 @@ const client = new Client({
 // Inicializar API de Gemini
 const ai = process.env.gemini_api_key ? new GoogleGenAI({ apiKey: process.env.gemini_api_key }) : null;
 
-// Lista de modelos ordenados de preferencia para el Fallback
+// Lista de modelos ordenados de preferencia para Fallback
 const MODELOS_GEMINI = [
   'gemini-2.5-flash',
   'gemini-2.0-flash',
@@ -72,6 +72,14 @@ function obtenerChisteAleatorio() {
   return CHISTES_MATEMATICOS[Math.floor(Math.random() * CHISTES_MATEMATICOS.length)];
 }
 
+// Función para corregir errores comunes de escritura humana
+function limpiarExpresion(expr) {
+  return expr
+    .replace(/[,]/g, '.')                   // Cambia comas decimales por puntos (ej: 3,14 -> 3.14)
+    .replace(/(\d)\s*x\s*(\d)/gi, '$1*$2')  // Cambia 'x' por '*' (ej: 5 x 5 -> 5 * 5)
+    .replace(/(\d)\s+(?=\d)/g, '$1');       // Une números separados por espacios (ej: "3 1289" -> "31289")
+}
+
 // Actualizar el Estado del Bot usando la IA
 async function actualizarEstadoAI() {
   const prompt = "Genera una frase ultra corta (máximo 6 palabras) para el estado de un bot de Discord llamado Calki que es una calculadora sarcástica e inteligente. En español. Ejemplos: 'Dividiendo por cero...', 'Odiando las matrices', 'Pensando en Pi'. Responde ÚNICAMENTE con la frase, sin comillas.";
@@ -103,7 +111,6 @@ async function eventoEspontaneoAI() {
 
   console.log(`\n🧠 [Calki Dato Curioso en Consola]: ${datoCurioso}\n`);
 
-  // Intenta enviar el mensaje a un canal de texto del servidor si tiene permisos
   try {
     const canal = client.channels.cache.find(c => 
       c.isTextBased() && 
@@ -118,7 +125,6 @@ async function eventoEspontaneoAI() {
   }
 }
 
-// Usamos clientReady en lugar de ready para evitar DeprecationWarnings en d.js v14/v15
 client.on('clientReady', () => {
   console.log(`🤖 Calki está lista y operando como ${client.user.tag}`);
 
@@ -162,21 +168,33 @@ client.on('messageCreate', async (message) => {
   if (/^(calki|calcula|calculadora)\b/i.test(lower)) {
     expr = content.replace(/^(calki|calcula|calculadora)\s*/i, '');
     isCommand = true;
-  } else if (/^[\d\s+\-*/%^().]+$/.test(content) && /[\d]/.test(content) && /[+\-*/%^]/.test(content)) {
+  } else if (/^[\d\s+\-*/%^().xX,]+$/.test(content) && /[\d]/.test(content) && /[+\-*/%^xX]/.test(content)) {
     expr = content;
   }
 
   if (expr.trim()) {
+    let result;
+    const exprLimpia = limpiarExpresion(expr);
+
+    // 1. Intentar calcular con mathjs
     try {
-      const result = evaluate(expr);
-      if (result !== undefined) {
-        await message.reply(`🧮 **Resultado:** \`${result}\` *(Fácil)*`);
-      }
+      result = evaluate(exprLimpia);
     } catch (err) {
-      if (isCommand) {
-        const chiste = obtenerChisteAleatorio();
-        await message.reply(`❌ **Error de sintaxis.** ${chiste}`);
+      // 2. Respaldo: Si mathjs falla, le pedimos ayuda a la IA de Gemini
+      const promptAI = `Resuelve la siguiente expresión matemática. El usuario pudo cometer errores de formato o tipeo: "${expr}". Responde ÚNICAMENTE con el número del resultado final. Si definitivamente no es una operación matemática, responde "INVALIDO".`;
+      const respuestaAI = await generarTextoConFallback(promptAI);
+      
+      if (respuestaAI && !respuestaAI.includes('INVALIDO')) {
+        result = respuestaAI.trim();
       }
+    }
+
+    // Responder con el resultado o con un chiste si fallan ambos
+    if (result !== undefined) {
+      await message.reply(`🧮 **Resultado:** \`${result}\` *(Fácil)*`);
+    } else if (isCommand) {
+      const chiste = obtenerChisteAleatorio();
+      await message.reply(`❌ **Error de sintaxis.** ${chiste}`);
     }
   } else if (isCommand) {
     await message.reply(`¿Me llamaste? Escribe una operación válida. ${obtenerChisteAleatorio()}`);
