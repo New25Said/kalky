@@ -23,14 +23,16 @@ const client = new Client({
 const apiKey = process.env.gemini_api_key;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// Modelos de Gemini probados en orden
+// Modelos estables de Gemini
 const MODELOS_GEMINI = [
   'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-2.0-flash'
+  'gemini-1.5-flash'
 ];
 
-// Estados aleatorios de respaldo si la IA falla o se agota la cuota
+// Control de cuota (cooldown)
+let apiBloqueadaHasta = 0;
+
+// Estados aleatorios de respaldo
 const ESTADOS_RESPALDO = [
   "Dividiendo por cero...",
   "Odiando las matrices...",
@@ -49,10 +51,11 @@ const ESTADOS_RESPALDO = [
   "Evitando errores 404..."
 ];
 
-// Función con fallback y logs detallados de error
 async function generarTextoConFallback(prompt) {
-  if (!ai) {
-    console.warn('[Gemini Warning] No se detectó la variable gemini_api_key en Render.');
+  if (!ai) return null;
+
+  // Si la API está en tiempo de espera por cuota, se omite la llamada
+  if (Date.now() < apiBloqueadaHasta) {
     return null;
   }
 
@@ -66,14 +69,18 @@ async function generarTextoConFallback(prompt) {
         return response.text.trim();
       }
     } catch (error) {
-      console.warn(`[Gemini Fallback] ${model} falló. Motivo: ${error.message}`);
+      if (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED')) {
+        console.warn(`[Gemini Quota] Cuota excedida en ${model}. Pausando peticiones a la IA por 15 min.`);
+        apiBloqueadaHasta = Date.now() + 15 * 60 * 1000; // Bloquea llamadas a la API por 15 minutos
+        break;
+      } else {
+        console.warn(`[Gemini Fallback] ${model} no respondió.`);
+      }
     }
   }
-  console.error('[Gemini Error] Ningún modelo respondió correctamente.');
   return null;
 }
 
-// Banco de chistes matemáticos
 const CHISTES_MATEMATICOS = [
   "¿Qué le dice un vector a otro? ¿Tienes un momento?",
   "¿Qué le dice un número 0 a un número 8? ¡Buen cinturón!",
@@ -102,13 +109,11 @@ function limpiarExpresion(expr) {
     .replace(/(\d)\s+(?=\d)/g, '$1');
 }
 
-// Cambia el estado usando la IA (o respaldo dinámico)
 async function actualizarEstadoAI() {
-  const prompt = "Genera una frase ultra corta (máximo 5 palabras) para el estado de Discord de un bot calculadora llamado Calki. En español. Ejemplos: 'Odiando las matrices', 'Pensando en Pi', 'Calculando el fin del mundo'. Responde SOLO la frase, sin comillas.";
+  const prompt = "Genera una frase corta (máximo 5 palabras) para el estado de Discord de una calculadora sarcástica llamada Calki. En español, sin comillas.";
 
   const statusText = await generarTextoConFallback(prompt);
   
-  // Si la IA responde se usa su texto; si falla, elige uno al azar de la lista de respaldo
   const textoFinal = statusText 
     ? statusText.replace(/^["']|["']$/g, '') 
     : ESTADOS_RESPALDO[Math.floor(Math.random() * ESTADOS_RESPALDO.length)];
@@ -125,12 +130,11 @@ async function actualizarEstadoAI() {
     activities: [{ name: textoFinal, type: tipoAleatorio }],
     status: 'online',
   });
-  console.log(`[Calki AI Status]: ${textoFinal}`);
+  console.log(`[Calki Status]: ${textoFinal}`);
 }
 
-// Evento espontáneo aleatorio
 async function eventoEspontaneoAI() {
-  const prompt = "Genera un dato curioso, científico o matemático muy corto (máximo 2 oraciones). En español, ingenioso y divertido.";
+  const prompt = "Genera un dato curioso, científico o matemático muy corto (máximo 2 oraciones). En español, ingenioso.";
   
   const datoCurioso = await generarTextoConFallback(prompt);
   if (!datoCurioso) return;
@@ -154,15 +158,15 @@ async function eventoEspontaneoAI() {
 client.on('clientReady', () => {
   console.log(`🤖 Calki está lista y operando como ${client.user.tag}`);
 
-  // Actualizar estado al conectar y luego CADA 2 MINUTOS (máxima velocidad segura)
+  // Actualizar estado al conectar y luego cada 10 minutos
   actualizarEstadoAI();
-  cron.schedule('*/2 * * * *', () => {
+  cron.schedule('*/10 * * * *', () => {
     actualizarEstadoAI();
   });
 
-  // Evento aleatorio cada 15 minutos (40% probabilidad)
-  cron.schedule('*/15 * * * *', () => {
-    if (Math.random() < 0.4) {
+  // Evento aleatorio cada 20 minutos (30% probabilidad)
+  cron.schedule('*/20 * * * *', () => {
+    if (Math.random() < 0.3) {
       eventoEspontaneoAI();
     }
   });
@@ -205,7 +209,7 @@ client.on('messageCreate', async (message) => {
     try {
       result = evaluate(exprLimpia);
     } catch (err) {
-      const promptAI = `Resuelve esta operación matemática: "${expr}". Responde ÚNICAMENTE con el número final del resultado. Si no es una operación válida, responde "INVALIDO".`;
+      const promptAI = `Resuelve esta operación matemática: "${expr}". Responde ÚNICAMENTE con el número final. Si no es válida, responde "INVALIDO".`;
       const respuestaAI = await generarTextoConFallback(promptAI);
       
       if (respuestaAI && !respuestaAI.includes('INVALIDO')) {
