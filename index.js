@@ -23,8 +23,6 @@ const client = new Client({
 const apiKey = process.env.gemini_api_key;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// Reemplaza esta sección en tu index.js:
-
 // Modelos oficiales de la API de Gemini
 const MODELOS_GEMINI = [
   'gemini-3.6-flash',
@@ -32,7 +30,6 @@ const MODELOS_GEMINI = [
   'gemini-2.5-flash'
 ];
 
-// Control de cuota (cooldown)
 let apiBloqueadaHasta = 0;
 
 // Estados aleatorios de respaldo
@@ -54,10 +51,18 @@ const ESTADOS_RESPALDO = [
   "Evitando errores 404..."
 ];
 
+// Factos y datos de respaldo en caso de que la cuota de la IA esté agotada
+const FACTOS_RESPALDO = [
+  "El cero no existió en la numeración romana; recién se popularizó con la matemática árabe.",
+  "La calculadora científica moderna tiene más potencia de cálculo que la computadora del Apolo 11.",
+  "Las abejas pueden entender el concepto del número cero y hacer sumas simples.",
+  "Ada Lovelace escribió el primer algoritmo de la historia para una máquina mecánica en 1843.",
+  "Si doblas un papel sobre sí mismo 42 veces, su grosor alcanzaría la distancia a la Luna."
+];
+
 async function generarTextoConFallback(prompt) {
   if (!ai) return null;
 
-  // Si la API está en tiempo de espera por cuota, se omite la llamada
   if (Date.now() < apiBloqueadaHasta) {
     return null;
   }
@@ -74,7 +79,7 @@ async function generarTextoConFallback(prompt) {
     } catch (error) {
       if (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED')) {
         console.warn(`[Gemini Quota] Cuota excedida en ${model}. Pausando peticiones a la IA por 15 min.`);
-        apiBloqueadaHasta = Date.now() + 15 * 60 * 1000; // Bloquea llamadas a la API por 15 minutos
+        apiBloqueadaHasta = Date.now() + 15 * 60 * 1000;
         break;
       } else {
         console.warn(`[Gemini Fallback] ${model} no respondió.`);
@@ -161,20 +166,17 @@ async function eventoEspontaneoAI() {
 client.on('clientReady', () => {
   console.log(`🤖 Calki está lista y operando como ${client.user.tag}`);
 
-  // Actualizar estado al conectar y luego cada 10 minutos
   actualizarEstadoAI();
   cron.schedule('*/10 * * * *', () => {
     actualizarEstadoAI();
   });
 
-  // Evento aleatorio cada 20 minutos (30% probabilidad)
   cron.schedule('*/20 * * * *', () => {
     if (Math.random() < 0.3) {
       eventoEspontaneoAI();
     }
   });
 
-  // Keep-Alive para Render
   const renderUrl = process.env.RENDER_EXTERNAL_URL;
   if (renderUrl) {
     cron.schedule('*/10 * * * *', async () => {
@@ -195,11 +197,26 @@ client.on('messageCreate', async (message) => {
   const content = message.content.trim();
   const lower = content.toLowerCase();
 
+  // 1. Detector de "Dato histórico" o "Calki/Kalky/Calculadora tira un facto"
+  const pideHistorico = lower.includes('dato historico') || lower.includes('dato histórico');
+  const pideFacto = /^(calki|kalky|calculadora)\b.*tira\s+un?\s+facto/i.test(lower);
+
+  if (pideHistorico || pideFacto) {
+    const tipoDato = pideHistorico ? "un dato histórico relevante e interesante" : "un facto indiscutible, científico, curioso o histórico";
+    const promptFacto = `Genera ${tipoDato} en máximo 2 oraciones. Que sea verídico, corto e impactante. En español.`;
+    
+    const factoAI = await generarTextoConFallback(promptFacto);
+    const factoFinal = factoAI || FACTOS_RESPALDO[Math.floor(Math.random() * FACTOS_RESPALDO.length)];
+
+    return await message.reply(`📌 **Facto de Calki:**\n> ${factoFinal}`);
+  }
+
+  // 2. Comandos normales de cálculo
   let expr = '';
   let isCommand = false;
 
-  if (/^(calki|calcula|calculadora)\b/i.test(lower)) {
-    expr = content.replace(/^(calki|calcula|calculadora)\s*/i, '');
+  if (/^(calki|kalky|calcula|calculadora)\b/i.test(lower)) {
+    expr = content.replace(/^(calki|kalky|calcula|calculadora)\s*/i, '');
     isCommand = true;
   } else if (/^[\d\s+\-*/%^().xX,]+$/.test(content) && /[\d]/.test(content) && /[+\-*/%^xX]/.test(content)) {
     expr = content;
