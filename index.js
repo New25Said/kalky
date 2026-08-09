@@ -8,7 +8,7 @@ const cron = require('node-cron');
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Calki sigue despierta y operando!'));
-const server = app.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
 
 // Cliente de Discord
 const client = new Client({
@@ -19,8 +19,36 @@ const client = new Client({
   ]
 });
 
-// Inicializar API de Gemini con la variable especificada
+// Inicializar API de Gemini
 const ai = process.env.gemini_api_key ? new GoogleGenAI({ apiKey: process.env.gemini_api_key }) : null;
+
+// Lista de modelos ordenados de preferencia para el Fallback
+const MODELOS_GEMINI = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash'
+];
+
+// Función para solicitar texto a Gemini probando modelos uno a uno
+async function generarTextoConFallback(prompt) {
+  if (!ai) return null;
+
+  for (const model of MODELOS_GEMINI) {
+    try {
+      const response = await ai.models.generateContent({
+        model: model,
+        contents: prompt,
+      });
+      if (response && response.text) {
+        return response.text.trim();
+      }
+    } catch (error) {
+      console.warn(`[Gemini Fallback] El modelo ${model} falló, intentando el siguiente...`);
+    }
+  }
+  console.error('[Gemini Error] Ningún modelo de la lista estuvo disponible.');
+  return null;
+}
 
 // Banco extenso de chistes y respuestas sarcásticas para Calki
 const CHISTES_MATEMATICOS = [
@@ -44,48 +72,70 @@ function obtenerChisteAleatorio() {
   return CHISTES_MATEMATICOS[Math.floor(Math.random() * CHISTES_MATEMATICOS.length)];
 }
 
-// Generador de Estado vía Gemini
+// Actualizar el Estado del Bot usando la IA
 async function actualizarEstadoAI() {
-  if (!ai) return;
+  const prompt = "Genera una frase ultra corta (máximo 6 palabras) para el estado de un bot de Discord llamado Calki que es una calculadora sarcástica e inteligente. En español. Ejemplos: 'Dividiendo por cero...', 'Odiando las matrices', 'Pensando en Pi'. Responde ÚNICAMENTE con la frase, sin comillas.";
 
-  const prompt = "Genera una frase ultra corta (máximo 6 palabras) para el estado de estado de un bot de Discord llamado Calki que es una calculadora sarcástica e inteligente. En español. Ejemplos: 'Dividiendo por cero...', 'Odiando las matrices', 'Pensando en Pi'. Solo responde con la frase.";
+  const statusText = await generarTextoConFallback(prompt);
+  const textoFinal = statusText ? statusText.replace(/^["']|["']$/g, '') : "Calculando Pi...";
 
+  const actividades = [
+    ActivityType.Playing,
+    ActivityType.Watching,
+    ActivityType.Listening,
+    ActivityType.Competing
+  ];
+  const tipoAleatorio = actividades[Math.floor(Math.random() * actividades.length)];
+
+  client.user.setPresence({
+    activities: [{ name: textoFinal, type: tipoAleatorio }],
+    status: 'online',
+  });
+  console.log(`[Calki AI Status]: ${textoFinal}`);
+}
+
+// Evento aleatorio espontáneo: publica datos curiosos o reflexiones científicas
+async function eventoEspontaneoAI() {
+  const prompt = "Genera un dato curioso, científico, matemático o un pensamiento filosófico de computadora súper interesante y corto (máximo 2 oraciones). En español, con un toque ingenioso o sarcástico.";
+  
+  const datoCurioso = await generarTextoConFallback(prompt);
+  if (!datoCurioso) return;
+
+  console.log(`\n🧠 [Calki Dato Curioso en Consola]: ${datoCurioso}\n`);
+
+  // Intenta enviar el mensaje a un canal de texto del servidor si tiene permisos
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-lite',
-      contents: prompt,
-    });
+    const canal = client.channels.cache.find(c => 
+      c.isTextBased() && 
+      c.permissionsFor(client.user)?.has('SendMessages')
+    );
 
-    const statusText = response.text ? response.text.trim().replace(/^["']|["']$/g, '') : "Calculando Pi...";
-
-    const actividades = [
-      ActivityType.Playing,
-      ActivityType.Watching,
-      ActivityType.Listening,
-      ActivityType.Competing
-    ];
-    const tipoAleatorio = actividades[Math.floor(Math.random() * actividades.length)];
-
-    client.user.setPresence({
-      activities: [{ name: statusText, type: tipoAleatorio }],
-      status: 'online',
-    });
-    console.log(`[Calki AI Status]: ${statusText}`);
-  } catch (error) {
-    console.error("Error al obtener estado con Gemini:", error.message);
+    if (canal) {
+      await canal.send(`💡 **Dato curioso fuera de contexto:**\n> ${datoCurioso}`);
+    }
+  } catch (err) {
+    console.error('No se pudo enviar el dato curioso a un canal:', err.message);
   }
 }
 
-client.on('ready', () => {
+// Usamos clientReady en lugar de ready para evitar DeprecationWarnings en d.js v14/v15
+client.on('clientReady', () => {
   console.log(`🤖 Calki está lista y operando como ${client.user.tag}`);
 
-  // Actualizar estado al iniciar y luego cada 5 minutos
+  // Actualizar estado al iniciar y cada 5 minutos
   actualizarEstadoAI();
   cron.schedule('*/5 * * * *', () => {
     actualizarEstadoAI();
   });
 
-  // Sistema Keep-Alive para Render (Autoping cada 10 minutos)
+  // Evento aleatorio cada 15 minutos (40% de probabilidad de activarse espontáneamente)
+  cron.schedule('*/15 * * * *', () => {
+    if (Math.random() < 0.4) {
+      eventoEspontaneoAI();
+    }
+  });
+
+  // Autoping para Render (Keep-Alive)
   const renderUrl = process.env.RENDER_EXTERNAL_URL;
   if (renderUrl) {
     cron.schedule('*/10 * * * *', async () => {
@@ -99,7 +149,7 @@ client.on('ready', () => {
   }
 });
 
-// Lectura de Mensajes
+// Lectura e Interpretación de Mensajes
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
