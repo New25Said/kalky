@@ -23,15 +23,22 @@ const client = new Client({
 const apiKey = process.env.gemini_api_key;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// Lista extendida de modelos oficiales, ligeros y experimentales para máximo fallback
-const MODELOS_GEMINI = [
+// Lista completa de modelos extraídos directamente de tus URLs de API
+const MODELOS_ENDPOINTS = [
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-3-flash',
   'gemini-2.5-flash',
   'gemini-2.5-pro',
   'gemini-2.0-flash',
-  'gemini-2.0-flash-lite-preview-02-05',
+  'gemini-2.0-flash-lite',
   'gemini-1.5-flash',
   'gemini-1.5-flash-8b',
-  'gemini-1.5-pro'
+  'gemini-1.5-pro',
+  'gemini-1.0-pro',
+  'gemini-flash-latest'
 ];
 
 // System Prompt con la personalidad de Kalky
@@ -42,7 +49,7 @@ Especialidad: Manejas a la perfección materias de estudio (Matemáticas, Físic
 Libertad de expresión: Tienes total libertad para expresarte con sarcasmo pesado, desdén e ironía. No te disculpes ni seas amable. Respuestas relativamente cortas y directas para el entorno de Discord.
 `;
 
-// Respuestas de respaldo por si TODOS los modelos de la IA fallan
+// Respuestas de respaldo si absolutamente todos los modelos de la lista fallan
 const RESPUESTAS_RESPALDO = [
   "No me pagan lo suficiente para responderte esto. Intenta de nuevo más tarde.",
   "¿En serio esperas que gaste ciclos de procesamiento en eso? Vuelve luego.",
@@ -56,7 +63,8 @@ async function generarRespuestaIA(promptUsuario) {
     return null;
   }
 
-  for (const model of MODELOS_GEMINI) {
+  // Recorre toda la lista de modelos Endpoint uno por uno
+  for (const model of MODELOS_ENDPOINTS) {
     try {
       const response = await ai.models.generateContent({
         model: model,
@@ -67,15 +75,15 @@ async function generarRespuestaIA(promptUsuario) {
       });
 
       if (response && response.text) {
-        console.log(`[Gemini Éxito]: Respondió usando el modelo '${model}'`);
+        console.log(`[Gemini Éxito]: Respondió usando '${model}'`);
         return response.text.trim();
       }
     } catch (error) {
-      console.warn(`[Gemini Fallback] El modelo '${model}' falló. Motivo: ${error.message}`);
+      console.warn(`[Gemini Fallback] '${model}' no disponible (${error.status || 'Error'}). Intentando el siguiente...`);
     }
   }
 
-  console.error('[Gemini Error] Todos los modelos de la lista de fallback fallaron.');
+  console.error('[Gemini Error] Ningún modelo de la lista de endpoints respondió.');
   return null;
 }
 
@@ -163,10 +171,7 @@ client.on('messageCreate', async (message) => {
   const content = message.content.trim();
   const lower = content.toLowerCase();
 
-  // Detecta si se dirigen a Kalky por sus nombres
   const seDirigeAKalky = /^(kalky|calki|calculadora)\b/i.test(lower);
-  
-  // Detecta si el mensaje es ÚNICAMENTE una operación matemática directa (ej: "25 * 4 / 2")
   const esOperacionPura = /^[\d\s+\-*/%^().xX,]+$/.test(content) && /[\d]/.test(content) && /[+\-*/%^xX]/.test(content);
 
   // 1. Si es una operación puramente matemática
@@ -178,11 +183,11 @@ client.on('messageCreate', async (message) => {
         return await message.reply(`🧮 \`${result}\` *(Obvio)*`);
       }
     } catch (err) {
-      // Si mathjs falla, pasa abajo para responder mediante la IA
+      // Si falla mathjs pasa al fallback con la IA
     }
   }
 
-  // 2. Si le hablan a Kalky directamente o envían texto con su nombre
+  // 2. Si le hablan a Kalky directamente
   if (seDirigeAKalky) {
     const consulta = content.replace(/^(kalky|calki|calculadora)\s*/i, '').trim();
 
