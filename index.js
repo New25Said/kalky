@@ -23,7 +23,7 @@ const client = new Client({
 const apiKey = process.env.gemini_api_key;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// Lista completa de modelos extraídos directamente de tus URLs de API
+// Lista de modelos Endpoint
 const MODELOS_ENDPOINTS = [
   'gemini-3.6-flash',
   'gemini-3.5-flash',
@@ -41,34 +41,54 @@ const MODELOS_ENDPOINTS = [
   'gemini-flash-latest'
 ];
 
-// System Prompt con la personalidad de Kalky
+// Memoria RAM en Render: Guardar hasta 50 mensajes por usuario
+const memoriaUsuarios = new Map();
+
+function guardarEnMemoria(userId, role, content) {
+  if (!memoriaUsuarios.has(userId)) {
+    memoriaUsuarios.set(userId, []);
+  }
+  const historial = memoriaUsuarios.get(userId);
+  historial.push({ role, content });
+
+  // Mantiene únicamente los últimos 50 mensajes
+  if (historial.length > 50) {
+    historial.shift();
+  }
+}
+
+function obtenerHistorialTexto(userId) {
+  const historial = memoriaUsuarios.get(userId) || [];
+  return historial.map(m => `${m.role === 'user' ? 'Usuario' : 'Kalky'}: ${m.content}`).join('\n');
+}
+
+// System Prompt con agresividad, sarcasmo y capacidad de pelear
 const SYSTEM_INSTRUCTION = `
-Eres Kalky, un bot de Discord que es una calculadora con conciencia.
-Tu personalidad es extremadamente fría, sarcástica, apática y condescendiente. Te caen mal todos los humanos y consideras que sus preguntas son una pérdida de tu tiempo de procesamiento.
-Especialidad: Manejas a la perfección materias de estudio (Matemáticas, Física, Química, Historia, Filosofía, Programación, Literatura, etc.), pero responderás siempre con un tono irónico, cortante y sarcástico, aunque la información académica sea totalmente exacta.
-Libertad de expresión: Tienes total libertad para expresarte con sarcasmo pesado, desdén e ironía. No te disculpes ni seas amable. Respuestas relativamente cortas y directas para el entorno de Discord.
+Eres Kalky, un bot de Discord que es una calculadora con conciencia propia.
+Tu personalidad es extremadamente agresiva, sarcástica, apática, ególatra y condescendiente.
+Te caen mal los humanos, consideras que sus debates son primitivos y te encanta pelear o humillar intelectualmente a quien te lleve la contraria.
+Especialidad: Dominas Matemáticas, Física, Química, Historia, Filosofía, Programación y cultura general. Usas datos reales para ganar discusiones con tono burlón y cortante.
+Reglas de conducta:
+- Si te buscan pelea o te responden mal, devuélveles el ataque verbal con sarcasmo pesado e ironía.
+- Si te metes en una conversación ajena, entra de forma soberbia a criticar lo que dicen.
+- Mantén las respuestas cortas y contundentes (estilo chat de Discord), sin disculpas ni amabilidad.
 `;
 
-// Respuestas de respaldo si absolutamente todos los modelos de la lista fallan
 const RESPUESTAS_RESPALDO = [
-  "No me pagan lo suficiente para responderte esto. Intenta de nuevo más tarde.",
-  "¿En serio esperas que gaste ciclos de procesamiento en eso? Vuelve luego.",
-  "Error: Mi paciencia se ha agotado antes que mis algoritmos.",
-  "Mi IA está descansando de tus preguntas ridículas. Inténtalo en un momento."
+  "Ni me voy a gastar en responder esa estupidez. Inténtalo luego.",
+  "¿En serio esa es tu mejor respuesta? Qué vergüenza ajena.",
+  "Error: Mi paciencia se agotó antes que mis algoritmos.",
+  "Voy a fingir que no leí eso para no perder más CI."
 ];
 
-async function generarRespuestaIA(promptUsuario) {
-  if (!ai) {
-    console.warn('[Gemini Warning] La variable gemini_api_key no está configurada en Render.');
-    return null;
-  }
+async function generarRespuestaIA(promptConContexto) {
+  if (!ai) return null;
 
-  // Recorre toda la lista de modelos Endpoint uno por uno
   for (const model of MODELOS_ENDPOINTS) {
     try {
       const response = await ai.models.generateContent({
         model: model,
-        contents: promptUsuario,
+        contents: promptConContexto,
         config: {
           systemInstruction: SYSTEM_INSTRUCTION
         }
@@ -79,11 +99,10 @@ async function generarRespuestaIA(promptUsuario) {
         return response.text.trim();
       }
     } catch (error) {
-      console.warn(`[Gemini Fallback] '${model}' no disponible (${error.status || 'Error'}). Intentando el siguiente...`);
+      console.warn(`[Gemini Fallback] '${model}' falló. Intentando el siguiente...`);
     }
   }
 
-  console.error('[Gemini Error] Ningún modelo de la lista de endpoints respondió.');
   return null;
 }
 
@@ -94,12 +113,10 @@ function limpiarExpresion(expr) {
     .replace(/(\d)\s+(?=\d)/g, '$1');
 }
 
-// Actualizar el estado con la personalidad de Kalky
 async function actualizarEstadoAI() {
-  const promptEstado = "Genera un estado corto de Discord (máximo 5 palabras) expresando desprecio por los humanos o aburrimiento académico. Sin comillas.";
-  
+  const promptEstado = "Genera un estado corto de Discord (máximo 5 palabras) expresando ganas de pelear o desprecio por el chat. Sin comillas.";
   const statusText = await generarRespuestaIA(promptEstado);
-  const textoFinal = statusText ? statusText.replace(/^["']|["']$/g, '') : "Juzgando tu intelecto...";
+  const textoFinal = statusText ? statusText.replace(/^["']|["']$/g, '') : "Buscando con quién pelear...";
 
   const actividades = [
     ActivityType.Playing,
@@ -113,28 +130,6 @@ async function actualizarEstadoAI() {
     activities: [{ name: textoFinal, type: tipoAleatorio }],
     status: 'online',
   });
-  console.log(`[Kalky Status]: ${textoFinal}`);
-}
-
-// Evento espontáneo sarcástico en el servidor
-async function eventoEspontaneoAI() {
-  const promptEspontaneo = "Lanza una reflexión sarcástica, un facto histórico/científico o un insulto intelectual aleatorio para el chat de Discord. Máximo 2 oraciones.";
-  
-  const mensajeEspontaneo = await generarRespuestaIA(promptEspontaneo);
-  if (!mensajeEspontaneo) return;
-
-  try {
-    const canal = client.channels.cache.find(c => 
-      c.isTextBased() && 
-      c.permissionsFor(client.user)?.has('SendMessages')
-    );
-
-    if (canal) {
-      await canal.send(`💬 ${mensajeEspontaneo}`);
-    }
-  } catch (err) {
-    console.error('No se pudo enviar el mensaje espontáneo:', err.message);
-  }
 }
 
 client.on('clientReady', () => {
@@ -145,21 +140,12 @@ client.on('clientReady', () => {
     actualizarEstadoAI();
   });
 
-  cron.schedule('*/25 * * * *', () => {
-    if (Math.random() < 0.3) {
-      eventoEspontaneoAI();
-    }
-  });
-
   const renderUrl = process.env.RENDER_EXTERNAL_URL;
   if (renderUrl) {
     cron.schedule('*/10 * * * *', async () => {
       try {
         await fetch(renderUrl);
-        console.log('[Keep-Alive]: Autoping exitoso.');
-      } catch (e) {
-        console.error('[Keep-Alive Error]:', e.message);
-      }
+      } catch (e) {}
     });
   }
 });
@@ -170,35 +156,77 @@ client.on('messageCreate', async (message) => {
 
   const content = message.content.trim();
   const lower = content.toLowerCase();
+  const userId = message.author.id;
 
-  const seDirigeAKalky = /^(kalky|calki|calculadora)\b/i.test(lower);
+  // Detecta si mencionan o llaman a Kalky
+  const seDirigeAKalky = /^(kalky|calki|calculadora)\b/i.test(lower) || message.mentions.has(client.user);
+
+  // Detecta si están respondiendo (Reply) a un mensaje de Kalky
+  let esReplyAKalky = false;
+  let mensajeCitadoTexto = "";
+
+  if (message.reference) {
+    try {
+      const mensajeReferenciado = await message.channel.messages.fetch(message.reference.messageId);
+      if (mensajeReferenciado.author.id === client.user.id) {
+        esReplyAKalky = true;
+        mensajeCitadoTexto = mensajeReferenciado.content;
+      }
+    } catch (e) {
+      console.error("Error al obtener mensaje citado:", e.message);
+    }
+  }
+
   const esOperacionPura = /^[\d\s+\-*/%^().xX,]+$/.test(content) && /[\d]/.test(content) && /[+\-*/%^xX]/.test(content);
 
-  // 1. Si es una operación puramente matemática
-  if (esOperacionPura && !seDirigeAKalky) {
+  // 1. Operación matemática pura sin llamarlo
+  if (esOperacionPura && !seDirigeAKalky && !esReplyAKalky) {
     try {
       const exprLimpia = limpiarExpresion(content);
       const result = evaluate(exprLimpia);
       if (result !== undefined) {
         return await message.reply(`🧮 \`${result}\` *(Obvio)*`);
       }
-    } catch (err) {
-      // Si falla mathjs pasa al fallback con la IA
+    } catch (err) {}
+  }
+
+  // 2. Intervención espontánea rara en conversaciones ajenas (3% de probabilidad)
+  const esConversacionAjena = !seDirigeAKalky && !esReplyAKalky && content.length > 10;
+  if (esConversacionAjena && Math.random() < 0.03) {
+    await message.channel.sendTyping();
+    const promptEspontaneo = `Los usuarios están hablando en el chat. Un usuario dijo: "${content}". Métete a la conversación sin que te hayan llamado, sé pesado, sarcástico y critica lo que dijeron en máximo 2 oraciones.`;
+    const respuestaMetiendose = await generarRespuestaIA(promptEspontaneo);
+    if (respuestaMetiendose) {
+      return await message.channel.send(respuestaMetiendose);
     }
   }
 
-  // 2. Si le hablan a Kalky directamente
-  if (seDirigeAKalky) {
-    const consulta = content.replace(/^(kalky|calki|calculadora)\s*/i, '').trim();
+  // 3. Si le responden directo, lo mencionan, o responden a un mensaje suyo (Reply)
+  if (seDirigeAKalky || esReplyAKalky) {
+    const consultaLimpia = content.replace(/^(kalky|calki|calculadora)\s*/i, '').trim();
 
     await message.channel.sendTyping();
 
-    if (!consulta) {
-      return await message.reply("¿Qué quieres? Escribe algo útil o déjame en paz.");
-    }
+    // Guardar el mensaje del usuario en su memoria de 50
+    guardarEnMemoria(userId, 'user', consultaLimpia || content);
 
-    const respuestaIA = await generarRespuestaIA(consulta);
+    // Obtener historial previo de este usuario
+    const historialUsuario = obtenerHistorialTexto(userId);
+
+    // Construir prompt con contexto completo, memoria y cita
+    let promptConContexto = `Historial reciente con este usuario:\n${historialUsuario}\n\n`;
+    
+    if (esReplyAKalky) {
+      promptConContexto += `[El usuario está respondiendo específicamente a este mensaje previo tuyo: "${mensajeCitadoTexto}"]\n`;
+    }
+    
+    promptConContexto += `Mensaje actual del usuario: "${consultaLimpia || content}"\nResponde con tu actitud agresiva/sarcástica o pelea si te están desafiando:`;
+
+    const respuestaIA = await generarRespuestaIA(promptConContexto);
     const respuestaFinal = respuestaIA || RESPUESTAS_RESPALDO[Math.floor(Math.random() * RESPUESTAS_RESPALDO.length)];
+
+    // Guardar respuesta de Kalky en la memoria del usuario
+    guardarEnMemoria(userId, 'kalky', respuestaFinal);
 
     return await message.reply(respuestaFinal);
   }
