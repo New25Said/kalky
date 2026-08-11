@@ -23,16 +23,18 @@ const client = new Client({
 const apiKey = process.env.gemini_api_key;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// Modelos oficiales de la API de Gemini
+// Lista extendida de modelos oficiales, ligeros y experimentales para máximo fallback
 const MODELOS_GEMINI = [
-  'gemini-3.6-flash',
-  'gemini-3.5-flash-lite',
-  'gemini-2.5-flash'
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite-preview-02-05',
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
+  'gemini-1.5-pro'
 ];
 
-let apiBloqueadaHasta = 0;
-
-// Prompt del sistema con la personalidad de Kalky
+// System Prompt con la personalidad de Kalky
 const SYSTEM_INSTRUCTION = `
 Eres Kalky, un bot de Discord que es una calculadora con conciencia.
 Tu personalidad es extremadamente fría, sarcástica, apática y condescendiente. Te caen mal todos los humanos y consideras que sus preguntas son una pérdida de tu tiempo de procesamiento.
@@ -40,18 +42,17 @@ Especialidad: Manejas a la perfección materias de estudio (Matemáticas, Físic
 Libertad de expresión: Tienes total libertad para expresarte con sarcasmo pesado, desdén e ironía. No te disculpes ni seas amable. Respuestas relativamente cortas y directas para el entorno de Discord.
 `;
 
-// Respuestas de respaldo por si se agota la cuota de la IA
+// Respuestas de respaldo por si TODOS los modelos de la IA fallan
 const RESPUESTAS_RESPALDO = [
-  "No me pagan lo suficiente para responderte esto. Intenta de nuevo cuando mi cuota se reinicie.",
-  "¿En serio esperas que gaste ciclos de procesamiento en eso? Vuelve más tarde.",
+  "No me pagan lo suficiente para responderte esto. Intenta de nuevo más tarde.",
+  "¿En serio esperas que gaste ciclos de procesamiento en eso? Vuelve luego.",
   "Error: Mi paciencia se ha agotado antes que mis algoritmos.",
-  "Mi IA está descansando de tus preguntas ridículas. Inténtalo luego."
+  "Mi IA está descansando de tus preguntas ridículas. Inténtalo en un momento."
 ];
 
 async function generarRespuestaIA(promptUsuario) {
-  if (!ai) return null;
-
-  if (Date.now() < apiBloqueadaHasta) {
+  if (!ai) {
+    console.warn('[Gemini Warning] La variable gemini_api_key no está configurada en Render.');
     return null;
   }
 
@@ -64,19 +65,17 @@ async function generarRespuestaIA(promptUsuario) {
           systemInstruction: SYSTEM_INSTRUCTION
         }
       });
+
       if (response && response.text) {
+        console.log(`[Gemini Éxito]: Respondió usando el modelo '${model}'`);
         return response.text.trim();
       }
     } catch (error) {
-      if (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED')) {
-        console.warn(`[Gemini Quota] Cuota excedida en ${model}. Pausando peticiones por 15 min.`);
-        apiBloqueadaHasta = Date.now() + 15 * 60 * 1000;
-        break;
-      } else {
-        console.warn(`[Gemini Fallback] ${model} no respondió.`);
-      }
+      console.warn(`[Gemini Fallback] El modelo '${model}' falló. Motivo: ${error.message}`);
     }
   }
+
+  console.error('[Gemini Error] Todos los modelos de la lista de fallback fallaron.');
   return null;
 }
 
@@ -179,7 +178,7 @@ client.on('messageCreate', async (message) => {
         return await message.reply(`🧮 \`${result}\` *(Obvio)*`);
       }
     } catch (err) {
-      // Si mathjs falla, pasa abajo para responder con la IA sarcástica
+      // Si mathjs falla, pasa abajo para responder mediante la IA
     }
   }
 
@@ -187,14 +186,12 @@ client.on('messageCreate', async (message) => {
   if (seDirigeAKalky) {
     const consulta = content.replace(/^(kalky|calki|calculadora)\s*/i, '').trim();
 
-    // Mostrar que está escribiendo mientras procesa
     await message.channel.sendTyping();
 
     if (!consulta) {
       return await message.reply("¿Qué quieres? Escribe algo útil o déjame en paz.");
     }
 
-    // Procesa todo mediante la IA con el System Instruction sarcástico
     const respuestaIA = await generarRespuestaIA(consulta);
     const respuestaFinal = respuestaIA || RESPUESTAS_RESPALDO[Math.floor(Math.random() * RESPUESTAS_RESPALDO.length)];
 
