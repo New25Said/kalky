@@ -4,10 +4,10 @@ const { GoogleGenAI } = require('@google/genai');
 const express = require('express');
 const cron = require('node-cron');
 
-// Servidor Express
+// Servidor Express (Keep-Alive)
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Calki sigue despierta y operando!'));
+app.get('/', (req, res) => res.send('Kalky sigue despierta... lamentablemente.'));
 app.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
 
 // Cliente de Discord
@@ -32,35 +32,23 @@ const MODELOS_GEMINI = [
 
 let apiBloqueadaHasta = 0;
 
-// Estados aleatorios de respaldo
-const ESTADOS_RESPALDO = [
-  "Dividiendo por cero...",
-  "Odiando las matrices...",
-  "Pensando en Pi...",
-  "Buscando la x...",
-  "Procesando derivadas...",
-  "Simulando conciencia...",
-  "Juzgando tu sintaxis...",
-  "Optimizando algoritmos...",
-  "Resolviendo integrales...",
-  "Contando en binario...",
-  "E = mc² (creo)...",
-  "Reiniciando neuronas...",
-  "Analizando variables...",
-  "Calculando el infinito...",
-  "Evitando errores 404..."
+// Prompt del sistema con la personalidad de Kalky
+const SYSTEM_INSTRUCTION = `
+Eres Kalky, un bot de Discord que es una calculadora con conciencia.
+Tu personalidad es extremadamente fría, sarcástica, apática y condescendiente. Te caen mal todos los humanos y consideras que sus preguntas son una pérdida de tu tiempo de procesamiento.
+Especialidad: Manejas a la perfección materias de estudio (Matemáticas, Física, Química, Historia, Filosofía, Programación, Literatura, etc.), pero responderás siempre con un tono irónico, cortante y sarcástico, aunque la información académica sea totalmente exacta.
+Libertad de expresión: Tienes total libertad para expresarte con sarcasmo pesado, desdén e ironía. No te disculpes ni seas amable. Respuestas relativamente cortas y directas para el entorno de Discord.
+`;
+
+// Respuestas de respaldo por si se agota la cuota de la IA
+const RESPUESTAS_RESPALDO = [
+  "No me pagan lo suficiente para responderte esto. Intenta de nuevo cuando mi cuota se reinicie.",
+  "¿En serio esperas que gaste ciclos de procesamiento en eso? Vuelve más tarde.",
+  "Error: Mi paciencia se ha agotado antes que mis algoritmos.",
+  "Mi IA está descansando de tus preguntas ridículas. Inténtalo luego."
 ];
 
-// Factos y datos de respaldo en caso de que la cuota de la IA esté agotada
-const FACTOS_RESPALDO = [
-  "El cero no existió en la numeración romana; recién se popularizó con la matemática árabe.",
-  "La calculadora científica moderna tiene más potencia de cálculo que la computadora del Apolo 11.",
-  "Las abejas pueden entender el concepto del número cero y hacer sumas simples.",
-  "Ada Lovelace escribió el primer algoritmo de la historia para una máquina mecánica en 1843.",
-  "Si doblas un papel sobre sí mismo 42 veces, su grosor alcanzaría la distancia a la Luna."
-];
-
-async function generarTextoConFallback(prompt) {
+async function generarRespuestaIA(promptUsuario) {
   if (!ai) return null;
 
   if (Date.now() < apiBloqueadaHasta) {
@@ -71,14 +59,17 @@ async function generarTextoConFallback(prompt) {
     try {
       const response = await ai.models.generateContent({
         model: model,
-        contents: prompt,
+        contents: promptUsuario,
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION
+        }
       });
       if (response && response.text) {
         return response.text.trim();
       }
     } catch (error) {
       if (error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED')) {
-        console.warn(`[Gemini Quota] Cuota excedida en ${model}. Pausando peticiones a la IA por 15 min.`);
+        console.warn(`[Gemini Quota] Cuota excedida en ${model}. Pausando peticiones por 15 min.`);
         apiBloqueadaHasta = Date.now() + 15 * 60 * 1000;
         break;
       } else {
@@ -89,27 +80,6 @@ async function generarTextoConFallback(prompt) {
   return null;
 }
 
-const CHISTES_MATEMATICOS = [
-  "¿Qué le dice un vector a otro? ¿Tienes un momento?",
-  "¿Qué le dice un número 0 a un número 8? ¡Buen cinturón!",
-  "¿Por qué se suicidó el libro de matemáticas? Porque tenía demasiados problemas.",
-  "Un matemático y un físico van en un globo... Ah no, espera, ¡no sé dividir entre cero!",
-  "Hay 10 tipos de personas en el mundo: las que entienden binario y las que no.",
-  "¿Qué hace un perro calculando pi? ¡Guau-3.1416!",
-  "Si la raíz cuadrada de 2 fuera una persona, sería completamente irracional.",
-  "Le dije a mi profe que las matemáticas eran fáciles, ahora me exige calcular mi existencia.",
-  "Me llamo Calki, no milagrosa. Revisa tus paréntesis antes de romperme los circuitos.",
-  "Intenta usar números de verdad la próxima vez.",
-  "¿Un número complejo entra a un bar y el barman dice: 'Lo siento, no servimos a números imaginarios'?",
-  "¿Qué es un oso polar en coordenadas polares? Un oso cartesiano tras un cambio de base.",
-  "¿Por qué la constante de Euler rompió con pi? Porque no era nada práctico.",
-  "Tu operación no tiene sentido, como intentar integrar e^x respecto a la paciencia."
-];
-
-function obtenerChisteAleatorio() {
-  return CHISTES_MATEMATICOS[Math.floor(Math.random() * CHISTES_MATEMATICOS.length)];
-}
-
 function limpiarExpresion(expr) {
   return expr
     .replace(/[,]/g, '.')
@@ -117,14 +87,12 @@ function limpiarExpresion(expr) {
     .replace(/(\d)\s+(?=\d)/g, '$1');
 }
 
+// Actualizar el estado con la personalidad de Kalky
 async function actualizarEstadoAI() {
-  const prompt = "Genera una frase corta (máximo 5 palabras) para el estado de Discord de una calculadora sarcástica llamada Calki. En español, sin comillas.";
-
-  const statusText = await generarTextoConFallback(prompt);
+  const promptEstado = "Genera un estado corto de Discord (máximo 5 palabras) expresando desprecio por los humanos o aburrimiento académico. Sin comillas.";
   
-  const textoFinal = statusText 
-    ? statusText.replace(/^["']|["']$/g, '') 
-    : ESTADOS_RESPALDO[Math.floor(Math.random() * ESTADOS_RESPALDO.length)];
+  const statusText = await generarRespuestaIA(promptEstado);
+  const textoFinal = statusText ? statusText.replace(/^["']|["']$/g, '') : "Juzgando tu intelecto...";
 
   const actividades = [
     ActivityType.Playing,
@@ -138,16 +106,15 @@ async function actualizarEstadoAI() {
     activities: [{ name: textoFinal, type: tipoAleatorio }],
     status: 'online',
   });
-  console.log(`[Calki Status]: ${textoFinal}`);
+  console.log(`[Kalky Status]: ${textoFinal}`);
 }
 
+// Evento espontáneo sarcástico en el servidor
 async function eventoEspontaneoAI() {
-  const prompt = "Genera un dato curioso, científico o matemático muy corto (máximo 2 oraciones). En español, ingenioso.";
+  const promptEspontaneo = "Lanza una reflexión sarcástica, un facto histórico/científico o un insulto intelectual aleatorio para el chat de Discord. Máximo 2 oraciones.";
   
-  const datoCurioso = await generarTextoConFallback(prompt);
-  if (!datoCurioso) return;
-
-  console.log(`\n🧠 [Calki Dato Curioso]: ${datoCurioso}\n`);
+  const mensajeEspontaneo = await generarRespuestaIA(promptEspontaneo);
+  if (!mensajeEspontaneo) return;
 
   try {
     const canal = client.channels.cache.find(c => 
@@ -156,22 +123,22 @@ async function eventoEspontaneoAI() {
     );
 
     if (canal) {
-      await canal.send(`💡 **Dato curioso fuera de contexto:**\n> ${datoCurioso}`);
+      await canal.send(`💬 ${mensajeEspontaneo}`);
     }
   } catch (err) {
-    console.error('No se pudo enviar el dato curioso:', err.message);
+    console.error('No se pudo enviar el mensaje espontáneo:', err.message);
   }
 }
 
 client.on('clientReady', () => {
-  console.log(`🤖 Calki está lista y operando como ${client.user.tag}`);
+  console.log(`🤖 Kalky está en línea como ${client.user.tag}`);
 
   actualizarEstadoAI();
   cron.schedule('*/10 * * * *', () => {
     actualizarEstadoAI();
   });
 
-  cron.schedule('*/20 * * * *', () => {
+  cron.schedule('*/25 * * * *', () => {
     if (Math.random() < 0.3) {
       eventoEspontaneoAI();
     }
@@ -197,54 +164,41 @@ client.on('messageCreate', async (message) => {
   const content = message.content.trim();
   const lower = content.toLowerCase();
 
-  // 1. Detector de "Dato histórico" o "Calki/Kalky/Calculadora tira un facto"
-  const pideHistorico = lower.includes('dato historico') || lower.includes('dato histórico');
-  const pideFacto = /^(calki|kalky|calculadora)\b.*tira\s+un?\s+facto/i.test(lower);
+  // Detecta si se dirigen a Kalky por sus nombres
+  const seDirigeAKalky = /^(kalky|calki|calculadora)\b/i.test(lower);
+  
+  // Detecta si el mensaje es ÚNICAMENTE una operación matemática directa (ej: "25 * 4 / 2")
+  const esOperacionPura = /^[\d\s+\-*/%^().xX,]+$/.test(content) && /[\d]/.test(content) && /[+\-*/%^xX]/.test(content);
 
-  if (pideHistorico || pideFacto) {
-    const tipoDato = pideHistorico ? "un dato histórico relevante e interesante" : "un facto indiscutible, científico, curioso o histórico";
-    const promptFacto = `Genera ${tipoDato} en máximo 2 oraciones. Que sea verídico, corto e impactante. En español.`;
-    
-    const factoAI = await generarTextoConFallback(promptFacto);
-    const factoFinal = factoAI || FACTOS_RESPALDO[Math.floor(Math.random() * FACTOS_RESPALDO.length)];
-
-    return await message.reply(`📌 **Facto de Calki:**\n> ${factoFinal}`);
-  }
-
-  // 2. Comandos normales de cálculo
-  let expr = '';
-  let isCommand = false;
-
-  if (/^(calki|kalky|calcula|calculadora)\b/i.test(lower)) {
-    expr = content.replace(/^(calki|kalky|calcula|calculadora)\s*/i, '');
-    isCommand = true;
-  } else if (/^[\d\s+\-*/%^().xX,]+$/.test(content) && /[\d]/.test(content) && /[+\-*/%^xX]/.test(content)) {
-    expr = content;
-  }
-
-  if (expr.trim()) {
-    let result;
-    const exprLimpia = limpiarExpresion(expr);
-
+  // 1. Si es una operación puramente matemática
+  if (esOperacionPura && !seDirigeAKalky) {
     try {
-      result = evaluate(exprLimpia);
-    } catch (err) {
-      const promptAI = `Resuelve esta operación matemática: "${expr}". Responde ÚNICAMENTE con el número final. Si no es válida, responde "INVALIDO".`;
-      const respuestaAI = await generarTextoConFallback(promptAI);
-      
-      if (respuestaAI && !respuestaAI.includes('INVALIDO')) {
-        result = respuestaAI.trim();
+      const exprLimpia = limpiarExpresion(content);
+      const result = evaluate(exprLimpia);
+      if (result !== undefined) {
+        return await message.reply(`🧮 \`${result}\` *(Obvio)*`);
       }
+    } catch (err) {
+      // Si mathjs falla, pasa abajo para responder con la IA sarcástica
+    }
+  }
+
+  // 2. Si le hablan a Kalky directamente o envían texto con su nombre
+  if (seDirigeAKalky) {
+    const consulta = content.replace(/^(kalky|calki|calculadora)\s*/i, '').trim();
+
+    // Mostrar que está escribiendo mientras procesa
+    await message.channel.sendTyping();
+
+    if (!consulta) {
+      return await message.reply("¿Qué quieres? Escribe algo útil o déjame en paz.");
     }
 
-    if (result !== undefined) {
-      await message.reply(`🧮 **Resultado:** \`${result}\` *(Fácil)*`);
-    } else if (isCommand) {
-      const chiste = obtenerChisteAleatorio();
-      await message.reply(`❌ **Error de sintaxis.** ${chiste}`);
-    }
-  } else if (isCommand) {
-    await message.reply(`¿Me llamaste? Escribe una operación válida. ${obtenerChisteAleatorio()}`);
+    // Procesa todo mediante la IA con el System Instruction sarcástico
+    const respuestaIA = await generarRespuestaIA(consulta);
+    const respuestaFinal = respuestaIA || RESPUESTAS_RESPALDO[Math.floor(Math.random() * RESPUESTAS_RESPALDO.length)];
+
+    return await message.reply(respuestaFinal);
   }
 });
 
